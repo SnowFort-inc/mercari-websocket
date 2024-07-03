@@ -1,38 +1,54 @@
 import { WebSocketServer } from "ws";
+import WebSocket from "ws";
+
+interface Message {
+  type: "join" | "broadcast";
+  room: string;
+}
 
 const wss = new WebSocketServer({ port: 3000 });
+const rooms = new Map<string, Set<WebSocket>>();
 
-const rooms = new Map();
+const joinRoom = (ws: WebSocket, roomName: string) => {
+  if (!rooms.has(roomName)) {
+    rooms.set(roomName, new Set<WebSocket>());
+  }
+  rooms.get(roomName)?.add(ws);
+  console.log(`クライアントがルーム${roomName}に参加しました`);
+};
 
-wss.on("connection", function connection(ws) {
+const broadcastMessage = (ws: WebSocket, message: Message) => {
+  const roomName = message.room;
+  rooms.get(roomName)?.forEach((client) => {
+    if (client !== ws && client.readyState === WebSocket.OPEN) {
+      console.log(`メッセージを送信しました: ${JSON.stringify(message)}`);
+      client.send(JSON.stringify(message));
+    }
+  });
+};
+
+wss.on("connection", (ws: WebSocket) => {
   console.log("クライアントが接続しました");
 
-  ws.on("message", function message(data) {
-    const message = JSON.parse(data.toString());
+  ws.on("message", (data: WebSocket.Data) => {
+    const message: Message = JSON.parse(data.toString());
+    const { type, room: roomName } = message;
 
-    if (message.type === "join") {
-      const roomName = message.room;
-      if (!rooms.has(roomName)) {
-        rooms.set(roomName, new Set());
-      }
-      rooms.get(roomName).add(ws);
-      console.log(`クライアントがルーム${roomName}に参加しました`);
-    } else if (message.type === "broadcast") {
-      const roomName = message.room;
-      if (rooms.has(roomName)) {
-        rooms.get(roomName).forEach((client: any) => {
-          if (client !== ws && client.readyState === WebSocket.OPEN) {
-            client.send(JSON.stringify(message));
-          }
-        });
-      }
+    switch (type) {
+      case "join":
+        joinRoom(ws, roomName);
+        break;
+      case "broadcast":
+        if (rooms.has(roomName)) {
+          broadcastMessage(ws, message);
+        }
+        break;
     }
   });
 
   ws.on("close", () => {
     rooms.forEach((clients, roomName) => {
-      if (clients.has(ws)) {
-        clients.delete(ws);
+      if (clients.delete(ws)) {
         console.log(`クライアントがルーム${roomName}から退出しました`);
       }
     });
